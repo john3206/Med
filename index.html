@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         :root {
             --primary: #1a4f72;
@@ -491,6 +492,36 @@
             margin-bottom: 8px;
         }
         
+        .action-btn {
+            padding: 5px 10px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-right: 5px;
+        }
+        
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c0392b;
+        }
+        
+        .resumo-mensal {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        
+        .resumo-mensal h3 {
+            color: var(--primary);
+            margin-bottom: 10px;
+        }
+        
         @media (max-width: 768px) {
             .sidebar {
                 transform: translateX(-100%);
@@ -664,6 +695,7 @@
                                 <th>Valor Total</th>
                                 <th>Usuário</th>
                                 <th>Tipo</th>
+                                <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -845,6 +877,7 @@
                             <option value="valor">Valor em Estoque</option>
                             <option value="frequencia">Frequência de Uso</option>
                             <option value="gastos">Gastos Mensais</option>
+                            <option value="top10">Top 10 Mais Utilizados</option>
                         </select>
                     </div>
                     <div class="form-group" id="periodoField">
@@ -884,6 +917,15 @@
                 </div>
                 
                 <button class="btn" onclick="gerarRelatorio()">Gerar Relatório</button>
+                
+                <div class="resumo-mensal" id="resumoMensal" style="display: none;">
+                    <h3>Resumo do Mês</h3>
+                    <p id="resumoMensalTexto"></p>
+                </div>
+                
+                <div class="chart-container" id="chartContainer" style="display: none;">
+                    <canvas id="relatorioChart"></canvas>
+                </div>
                 
                 <div class="table-container" id="relatorioResultado" style="margin-top: 20px;">
                     <!-- Resultados do relatório serão exibidos aqui -->
@@ -993,6 +1035,7 @@
         let scannerAtivo = false;
         let scannerCampoAlvo = null;
         let scannerStream = null;
+        let relatorioChart = null;
         
         // Inicializar bancos de dados
         function inicializarBancosDeDados() {
@@ -1312,7 +1355,7 @@
             video.srcObject = null;
         }
         
-        // Scanear código de barras
+        // Scanear código de barras - MELHORADO
         function scanearCodigo(video) {
             if (!scannerAtivo) return;
             
@@ -1325,20 +1368,25 @@
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-            const code = jsQR(imageData.data, imageData.width, imageData.height);
             
-            if (code) {
-                document.getElementById(scannerCampoAlvo).value = code.data;
-                fecharScanner();
+            try {
+                const code = jsQR(imageData.data, imageData.width, imageData.height);
                 
-                // Se for o campo de retirada, buscar o medicamento
-                if (scannerCampoAlvo === 'retirarCodigo') {
-                    buscarMedicamentoPorCodigo(code.data);
+                if (code) {
+                    document.getElementById(scannerCampoAlvo).value = code.data;
+                    fecharScanner();
+                    
+                    // Se for o campo de retirada, buscar o medicamento
+                    if (scannerCampoAlvo === 'retirarCodigo') {
+                        buscarMedicamentoPorCodigo(code.data);
+                    }
+                    
+                    // Ocultar ajuda de permissão se o scan foi bem-sucedido
+                    document.getElementById('cameraHelp').style.display = 'none';
+                    document.getElementById('cameraHelpRetirar').style.display = 'none';
                 }
-                
-                // Ocultar ajuda de permissão se o scan foi bem-sucedido
-                document.getElementById('cameraHelp').style.display = 'none';
-                document.getElementById('cameraHelpRetirar').style.display = 'none';
+            } catch (error) {
+                console.error('Erro no scanner:', error);
             }
             
             // Continuar escaneando
@@ -1398,7 +1446,7 @@
             }
         }
         
-        // Atualizar dashboard
+        // Atualizar dashboard - ATUALIZADO com ações
         function atualizarDashboard() {
             const medicamentos = obterDados(MEDICAMENTOS_DB);
             const movimentacoes = obterDados(MOVIMENTACOES_DB);
@@ -1478,10 +1526,53 @@
                     <td>${mov.valorTotal ? 'R$ ' + mov.valorTotal.toFixed(2) : '-'}</td>
                     <td>${usuario.nome}</td>
                     <td>${mov.tipo === 'devolucao' ? 'Devolução' : (mov.tipo === 'saida' ? 'Saída' : 'Entrada')}</td>
+                    <td>
+                        ${isAdmin() ? `<button class="action-btn btn-danger" onclick="excluirMovimentacao(${mov.id})">
+                            <i class="fas fa-trash"></i>
+                        </button>` : ''}
+                    </td>
                 `;
                 
                 tbody.appendChild(tr);
             });
+        }
+        
+        // Excluir movimentação
+        function excluirMovimentacao(id) {
+            if (!isAdmin()) {
+                alert('Você não tem permissão para excluir movimentações!');
+                return;
+            }
+            
+            if (confirm('Tem certeza que deseja excluir esta movimentação?')) {
+                const movimentacoes = obterDados(MOVIMENTACOES_DB);
+                const movimentacao = movimentacoes.find(m => m.id === id);
+                
+                if (movimentacao) {
+                    // Reverter a movimentação no estoque
+                    const medicamentos = obterDados(MEDICAMENTOS_DB);
+                    const medicamento = medicamentos.find(m => 
+                        m.nome === movimentacao.medicamento && m.lote === movimentacao.lote
+                    );
+                    
+                    if (medicamento) {
+                        if (movimentacao.tipo === 'saida') {
+                            medicamento.quantidade += movimentacao.quantidade;
+                        } else if (movimentacao.tipo === 'devolucao' || movimentacao.tipo === 'entrada') {
+                            medicamento.quantidade -= movimentacao.quantidade;
+                        }
+                        
+                        salvarDados(MEDICAMENTOS_DB, medicamentos);
+                    }
+                    
+                    // Remover a movimentação
+                    const movimentacoesAtualizadas = movimentacoes.filter(m => m.id !== id);
+                    salvarDados(MOVIMENTACOES_DB, movimentacoesAtualizadas);
+                    
+                    alert('Movimentação excluída com sucesso!');
+                    atualizarDashboard();
+                }
+            }
         }
         
         // Cadastrar medicamento
@@ -1588,7 +1679,7 @@
             }
         }
         
-        // Processar movimentação (retirada ou devolução)
+        // Processar movimentação (retirada ou devolução) - ATUALIZADO para calcular valor de devolução
         function processarMovimentacao() {
             const codigo = document.getElementById('retirarCodigo').value;
             const quantidade = parseInt(document.getElementById('quantidadeRetirada').value);
@@ -1632,7 +1723,7 @@
                 medicamento: medicamentos[medicamentoIndex].nome,
                 lote: medicamentos[medicamentoIndex].lote,
                 quantidade: quantidade,
-                valorTotal: tipo === 'saida' ? valorTotal : null,
+                valorTotal: tipo === 'devolucao' ? valorTotal : (tipo === 'saida' ? valorTotal : null),
                 usuario: usuarioLogado.id,
                 tipo: tipo,
                 motivo: motivo
@@ -1809,15 +1900,21 @@
             const periodoField = document.getElementById('periodoField');
             const mesField = document.getElementById('mesField');
             const anoField = document.getElementById('anoField');
+            const chartContainer = document.getElementById('chartContainer');
+            const resumoMensal = document.getElementById('resumoMensal');
             
             if (tipo === 'movimentacoes') {
                 periodoField.style.display = 'block';
                 mesField.style.display = 'none';
                 anoField.style.display = 'none';
-            } else if (tipo === 'gastos') {
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
+            } else if (tipo === 'gastos' || tipo === 'top10') {
                 periodoField.style.display = 'none';
                 mesField.style.display = 'block';
                 anoField.style.display = 'block';
+                chartContainer.style.display = tipo === 'top10' ? 'block' : 'none';
+                resumoMensal.style.display = tipo === 'gastos' ? 'block' : 'none';
                 
                 // Definir mês e ano atual
                 const hoje = new Date();
@@ -1827,6 +1924,8 @@
                 periodoField.style.display = 'none';
                 mesField.style.display = 'none';
                 anoField.style.display = 'none';
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
             }
         }
         
@@ -1839,9 +1938,11 @@
             
             const tipo = document.getElementById('relatorioTipo').value;
             const periodo = tipo === 'movimentacoes' ? parseInt(document.getElementById('relatorioPeriodo').value) : 0;
-            const mes = tipo === 'gastos' ? parseInt(document.getElementById('relatorioMes').value) : 0;
-            const ano = tipo === 'gastos' ? parseInt(document.getElementById('relatorioAno').value) : 0;
+            const mes = (tipo === 'gastos' || tipo === 'top10') ? parseInt(document.getElementById('relatorioMes').value) : 0;
+            const ano = (tipo === 'gastos' || tipo === 'top10') ? parseInt(document.getElementById('relatorioAno').value) : 0;
             const resultado = document.getElementById('relatorioResultado');
+            const chartContainer = document.getElementById('chartContainer');
+            const resumoMensal = document.getElementById('resumoMensal');
             
             let html = '';
             let titulo = '';
@@ -1849,27 +1950,219 @@
             if (tipo === 'vencimentos') {
                 titulo = 'Medicamentos Próximos do Vencimento';
                 html = gerarRelatorioVencimentos();
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
             } else if (tipo === 'estoque') {
                 titulo = 'Medicamentos com Estoque Baixo';
                 html = gerarRelatorioEstoqueBaixo();
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
             } else if (tipo === 'movimentacoes') {
                 titulo = 'Movimentações do Período';
                 html = gerarRelatorioMovimentacoes(periodo);
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
             } else if (tipo === 'valor') {
                 titulo = 'Valor Total em Estoque';
                 html = gerarRelatorioValorEstoque();
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
             } else if (tipo === 'frequencia') {
                 titulo = 'Frequência de Uso dos Medicamentos';
                 html = gerarRelatorioFrequencia();
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'none';
             } else if (tipo === 'gastos') {
                 titulo = `Gastos com Medicamentos - ${mes}/${ano}`;
                 html = gerarRelatorioGastos(mes, ano);
+                chartContainer.style.display = 'none';
+                resumoMensal.style.display = 'block';
+                atualizarResumoMensal(mes, ano);
+            } else if (tipo === 'top10') {
+                titulo = `Top 10 Medicamentos Mais Utilizados - ${mes}/${ano}`;
+                html = gerarRelatorioTop10(mes, ano);
+                chartContainer.style.display = 'block';
+                resumoMensal.style.display = 'none';
+                gerarGraficoTop10(mes, ano);
             }
             
             resultado.innerHTML = `
                 <h3>${titulo}</h3>
                 ${html}
             `;
+        }
+        
+        // Atualizar resumo mensal
+        function atualizarResumoMensal(mes, ano) {
+            const movimentacoes = obterDados(MOVIMENTACOES_DB);
+            const resumoMensalTexto = document.getElementById('resumoMensalTexto');
+            
+            // Filtrar movimentações do mês/ano especificado
+            const movimentacoesMes = movimentacoes.filter(mov => {
+                const dataMov = new Date(mov.data);
+                return dataMov.getMonth() + 1 === mes && 
+                       dataMov.getFullYear() === ano;
+            });
+            
+            // Calcular totais
+            let totalEntradas = 0;
+            let totalSaidas = 0;
+            let totalDevolucoes = 0;
+            
+            movimentacoesMes.forEach(mov => {
+                if (mov.tipo === 'entrada' && mov.valorTotal) {
+                    totalEntradas += mov.valorTotal;
+                } else if (mov.tipo === 'saida' && mov.valorTotal) {
+                    totalSaidas += mov.valorTotal;
+                } else if (mov.tipo === 'devolucao' && mov.valorTotal) {
+                    totalDevolucoes += mov.valorTotal;
+                }
+            });
+            
+            const totalLiquido = totalSaidas - totalDevolucoes;
+            
+            resumoMensalTexto.innerHTML = `
+                <p><strong>Total em Compras (Entradas):</strong> R$ ${totalEntradas.toFixed(2)}</p>
+                <p><strong>Total em Retiradas (Saídas):</strong> R$ ${totalSaidas.toFixed(2)}</p>
+                <p><strong>Total em Devoluções:</strong> R$ ${totalDevolucoes.toFixed(2)}</p>
+                <p><strong>Total Líquido Gasto:</strong> R$ ${totalLiquido.toFixed(2)}</p>
+            `;
+        }
+        
+        // Gerar gráfico Top 10
+        function gerarGraficoTop10(mes, ano) {
+            const movimentacoes = obterDados(MOVIMENTACOES_DB);
+            const canvas = document.getElementById('relatorioChart');
+            const ctx = canvas.getContext('2d');
+            
+            // Destruir gráfico anterior se existir
+            if (relatorioChart) {
+                relatorioChart.destroy();
+            }
+            
+            // Filtrar movimentações do mês/ano especificado (apenas saídas)
+            const movimentacoesMes = movimentacoes.filter(mov => {
+                const dataMov = new Date(mov.data);
+                return dataMov.getMonth() + 1 === mes && 
+                       dataMov.getFullYear() === ano &&
+                       mov.tipo === 'saida';
+            });
+            
+            // Agrupar por medicamento e contar quantidade
+            const medicamentosUtilizados = {};
+            movimentacoesMes.forEach(mov => {
+                if (!medicamentosUtilizados[mov.medicamento]) {
+                    medicamentosUtilizados[mov.medicamento] = 0;
+                }
+                medicamentosUtilizados[mov.medicamento] += mov.quantidade;
+            });
+            
+            // Converter para array e ordenar por quantidade (decrescente)
+            const medicamentosArray = Object.entries(medicamentosUtilizados)
+                .map(([medicamento, quantidade]) => ({ medicamento, quantidade }))
+                .sort((a, b) => b.quantidade - a.quantidade)
+                .slice(0, 10); // Top 10
+            
+            // Preparar dados para o gráfico
+            const labels = medicamentosArray.map(item => item.medicamento);
+            const data = medicamentosArray.map(item => item.quantidade);
+            
+            // Criar gráfico
+            relatorioChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Quantidade Utilizada',
+                        data: data,
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Quantidade'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Medicamentos'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: `Top 10 Medicamentos Mais Utilizados - ${mes}/${ano}`
+                        }
+                    }
+                }
+            });
+        }
+        
+        // Gerar relatório Top 10
+        function gerarRelatorioTop10(mes, ano) {
+            const movimentacoes = obterDados(MOVIMENTACOES_DB);
+            
+            // Filtrar movimentações do mês/ano especificado (apenas saídas)
+            const movimentacoesMes = movimentacoes.filter(mov => {
+                const dataMov = new Date(mov.data);
+                return dataMov.getMonth() + 1 === mes && 
+                       dataMov.getFullYear() === ano &&
+                       mov.tipo === 'saida';
+            });
+            
+            if (movimentacoesMes.length === 0) {
+                return `<p>Nenhuma movimentação de saída registrada em ${mes}/${ano}.</p>`;
+            }
+            
+            // Agrupar por medicamento e contar quantidade
+            const medicamentosUtilizados = {};
+            movimentacoesMes.forEach(mov => {
+                if (!medicamentosUtilizados[mov.medicamento]) {
+                    medicamentosUtilizados[mov.medicamento] = 0;
+                }
+                medicamentosUtilizados[mov.medicamento] += mov.quantidade;
+            });
+            
+            // Converter para array e ordenar por quantidade (decrescente)
+            const medicamentosArray = Object.entries(medicamentosUtilizados)
+                .map(([medicamento, quantidade]) => ({ medicamento, quantidade }))
+                .sort((a, b) => b.quantidade - a.quantidade)
+                .slice(0, 10); // Top 10
+            
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Posição</th>
+                            <th>Medicamento</th>
+                            <th>Quantidade Utilizada</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+            
+            medicamentosArray.forEach((item, index) => {
+                html += `
+                    <tr>
+                        <td>${index + 1}º</td>
+                        <td>${item.medicamento}</td>
+                        <td>${item.quantidade}</td>
+                    </tr>
+                `;
+            });
+            
+            html += '</tbody></table>';
+            return html;
         }
         
         // Gerar relatório de vencimentos
@@ -2083,7 +2376,7 @@
                 frequencia[mov.medicamento] += mov.quantidade;
             });
             
-            // Converter para array and ordenar por quantidade (decrescente)
+            // Converter para array e ordenar por quantidade (decrescente)
             const frequenciaArray = Object.entries(frequencia)
                 .map(([medicamento, quantidade]) => ({ medicamento, quantidade }))
                 .sort((a, b) => b.quantidade - a.quantidade);
@@ -2337,8 +2630,8 @@
             
             if (confirm('Tem certeza que deseja remover este usuário?')) {
                 const usuarios = obterDados(USUARIOS_DB);
-                const usuariosAtualizados = usuarios.filter(u => u.id !== id);
-                salvarDados(USUARIOS_DB, usuariosAtualizados);
+                const usuariosAtualizadas = usuarios.filter(u => u.id !== id);
+                salvarDados(USUARIOS_DB, usuariosAtualizadas);
                 
                 alert('Usuário removido com sucesso!');
                 carregarUsuarios();
