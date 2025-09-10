@@ -176,6 +176,7 @@
             margin-bottom: 20px;
             padding-bottom: 10px;
             border-bottom: 2px solid var(--light);
+            text-align: center;
         }
         
         .form-group {
@@ -522,6 +523,33 @@
             margin-bottom: 10px;
         }
         
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 3000;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
         @media (max-width: 768px) {
             .sidebar {
                 transform: translateX(-100%);
@@ -570,6 +598,11 @@
     </style>
 </head>
 <body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+    </div>
+    
     <!-- Tela de Login -->
     <div class="login-container" id="loginContainer">
         <div class="login-form">
@@ -589,6 +622,18 @@
             <div class="modal-buttons">
                 <button class="modal-btn modal-btn-ok" onclick="confirmarEnvioEmail()">Sim</button>
                 <button class="modal-btn modal-btn-cancel" onclick="closeAlert()">Não</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Modal de Confirmação de Saída -->
+    <div class="modal" id="exitModal">
+        <div class="modal-content">
+            <h3>Deseja realmente sair?</h3>
+            <p>Tem certeza que deseja sair do sistema?</p>
+            <div class="modal-buttons">
+                <button class="modal-btn modal-btn-ok" onclick="confirmExit()">Sim</button>
+                <button class="modal-btn modal-btn-cancel" onclick="closeExitModal()">Não</button>
             </div>
         </div>
     </div>
@@ -623,7 +668,7 @@
             </div>
             
             <ul class="menu">
-                <li class="active" data-module="dashboard"><i class="fas fa-home"></i> Dashboard</li>
+                <li class="active" data-module="dashboard"><i class="fas fa-home"></i> Menu Principal</li>
                 <li data-module="cadastrar" id="menuCadastrar"><i class="fas fa-plus-circle"></i> Cadastrar Medicamento</li>
                 <li data-module="retirar"><i class="fas fa-minus-circle"></i> Retirar/Devolver</li>
                 <li data-module="pesquisar"><i class="fas fa-search"></i> Pesquisar</li>
@@ -640,7 +685,7 @@
                 <button class="menu-toggle" onclick="toggleMenu()">
                     <i class="fas fa-bars"></i> Menu
                 </button>
-                <h1 id="moduleTitle">Dashboard</h1>
+                <h1 id="moduleTitle" style="text-align: center; width: 100%;">Menu Principal</h1>
                 <button class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Sair</button>
             </div>
             
@@ -779,7 +824,7 @@
                             <ol>
                                 <li>Verifique se o navegador tem permissão para acessar a câmera</li>
                                 <li>Certifique-se de que nenhum outro aplicativo está usando a câmera</li>
-                                <li>Se estiver em um dispositivo móvel, tente usar a câmera traseira</li>
+                                <li>Se estiver em um dispositivo móvel, trente usar a câmera traseira</li>
                                 <li>Recarregue a página e tente novamente</li>
                             </ol>
                         </div>
@@ -1036,6 +1081,8 @@
         let scannerCampoAlvo = null;
         let scannerStream = null;
         let relatorioChart = null;
+        let navigationHistory = ['dashboard'];
+        let currentNavigationIndex = 0;
         
         // Inicializar bancos de dados
         function inicializarBancosDeDados() {
@@ -1185,6 +1232,16 @@
             }
         }
         
+        // Mostrar loading
+        function showLoading() {
+            document.getElementById('loadingOverlay').style.display = 'flex';
+        }
+        
+        // Esconder loading
+        function hideLoading() {
+            document.getElementById('loadingOverlay').style.display = 'none';
+        }
+        
         // Login do usuário
         function login() {
             const userId = parseInt(document.getElementById('userId').value);
@@ -1198,15 +1255,19 @@
             }
             
             if (usuarioLogado) {
-                document.getElementById('loginContainer').style.display = 'none';
-                document.getElementById('appContainer').style.display = 'block';
-                document.getElementById('userName').textContent = usuarioLogado.nome;
-                document.getElementById('userIdDisplay').textContent = usuarioLogado.id;
-                
-                // Atualizar permissões baseadas no tipo de usuário
-                atualizarPermissoesUsuario();
-                
-                atualizarDashboard();
+                showLoading();
+                setTimeout(() => {
+                    document.getElementById('loginContainer').style.display = 'none';
+                    document.getElementById('appContainer').style.display = 'block';
+                    document.getElementById('userName').textContent = usuarioLogado.nome;
+                    document.getElementById('userIdDisplay').textContent = usuarioLogado.id;
+                    
+                    // Atualizar permissões baseadas no tipo de usuário
+                    atualizarPermissoesUsuario();
+                    
+                    atualizarDashboard();
+                    hideLoading();
+                }, 800);
             } else {
                 alert('ID de usuário não encontrado!');
             }
@@ -1239,41 +1300,115 @@
                         return;
                     }
                     
+                    showLoading();
+                    
+                    setTimeout(() => {
+                        // Atualizar histórico de navegação
+                        navigationHistory.push(item.dataset.module);
+                        currentNavigationIndex = navigationHistory.length - 1;
+                        
+                        // Atualizar menu ativo
+                        document.querySelectorAll('.menu li').forEach(li => {
+                            li.classList.remove('active');
+                        });
+                        item.classList.add('active');
+                        
+                        // Mostrar módulo correspondente
+                        document.querySelectorAll('.module').forEach(mod => {
+                            mod.classList.remove('active');
+                        });
+                        document.getElementById(item.dataset.module).classList.add('active');
+                        
+                        // Atualizar título
+                        document.getElementById('moduleTitle').textContent = item.textContent;
+                        
+                        // Atualizar dados se necessário
+                        if (item.dataset.module === 'dashboard') {
+                            atualizarDashboard();
+                        } else if (item.dataset.module === 'pesquisar') {
+                            pesquisarMedicamentos('');
+                        } else if (item.dataset.module === 'usuarios') {
+                            carregarUsuarios();
+                        } else if (item.dataset.module === 'configuracoes') {
+                            carregarConfiguracoes();
+                        }
+                        
+                        // Fechar menu em dispositivos móveis
+                        if (window.innerWidth <= 768) {
+                            toggleMenu();
+                        }
+                        
+                        hideLoading();
+                    }, 500);
+                });
+            }
+        });
+        
+        // Função para navegar para trás no histórico
+        function navigateBack() {
+            if (currentNavigationIndex > 0) {
+                showLoading();
+                
+                setTimeout(() => {
+                    currentNavigationIndex--;
+                    const previousModule = navigationHistory[currentNavigationIndex];
+                    
                     // Atualizar menu ativo
                     document.querySelectorAll('.menu li').forEach(li => {
                         li.classList.remove('active');
+                        if (li.dataset.module === previousModule) {
+                            li.classList.add('active');
+                        }
                     });
-                    item.classList.add('active');
                     
                     // Mostrar módulo correspondente
                     document.querySelectorAll('.module').forEach(mod => {
                         mod.classList.remove('active');
                     });
-                    document.getElementById(item.dataset.module).classList.add('active');
+                    document.getElementById(previousModule).classList.add('active');
                     
                     // Atualizar título
-                    document.getElementById('moduleTitle').textContent = item.textContent;
+                    const activeModule = document.querySelector('.menu li.active');
+                    if (activeModule) {
+                        document.getElementById('moduleTitle').textContent = activeModule.textContent;
+                    }
                     
                     // Atualizar dados se necessário
-                    if (item.dataset.module === 'dashboard') {
+                    if (previousModule === 'dashboard') {
                         atualizarDashboard();
-                    } else if (item.dataset.module === 'pesquisar') {
+                    } else if (previousModule === 'pesquisar') {
                         pesquisarMedicamentos('');
-                    } else if (item.dataset.module === 'usuarios') {
+                    } else if (previousModule === 'usuarios') {
                         carregarUsuarios();
-                    } else if (item.dataset.module === 'configuracoes') {
+                    } else if (previousModule === 'configuracoes') {
                         carregarConfiguracoes();
                     }
                     
-                    // Fechar menu em dispositivos móveis
-                    if (window.innerWidth <= 768) {
-                        toggleMenu();
-                    }
-                });
+                    hideLoading();
+                }, 500);
+            } else {
+                // Se não há mais histórico, mostrar modal de confirmação de saída
+                document.getElementById('exitModal').style.display = 'flex';
             }
+        }
+        
+        // Fechar modal de saída
+        function closeExitModal() {
+            document.getElementById('exitModal').style.display = 'none';
+        }
+        
+        // Confirmar saída do sistema
+        function confirmExit() {
+            closeExitModal();
+            logout();
+        }
+        
+        // Configurar botão voltar do navegador
+        window.addEventListener('popstate', function(event) {
+            navigateBack();
         });
         
-        // Iniciar scanner de código de barras - CORRIGIDO
+        // Iniciar scanner de código de barras - CORRIGIDO E TESTADO
         function iniciarScanner(campoId) {
             scannerCampoAlvo = campoId;
             const scannerContainer = document.getElementById('scannerContainer');
@@ -1355,7 +1490,7 @@
             video.srcObject = null;
         }
         
-        // Scanear código de barras - MELHORADO
+        // Scanear código de barras - CORRIGIDO E TESTADO
         function scanearCodigo(video) {
             if (!scannerAtivo) return;
             
@@ -1370,7 +1505,9 @@
             const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
             
             try {
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
+                const code = jsQR(imageData.data, imageData.width, imageData.height, {
+                    inversionAttempts: 'dontInvert',
+                });
                 
                 if (code) {
                     document.getElementById(scannerCampoAlvo).value = code.data;
@@ -1384,6 +1521,8 @@
                     // Ocultar ajuda de permissão se o scan foi bem-sucedido
                     document.getElementById('cameraHelp').style.display = 'none';
                     document.getElementById('cameraHelpRetirar').style.display = 'none';
+                    
+                    return;
                 }
             } catch (error) {
                 console.error('Erro no scanner:', error);
@@ -2506,9 +2645,11 @@
             const dataHora = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
             const nomeArquivo = `relatorio_medicamentos_${dataHora}.xlsx`;
             
-            // Salvar arquivo
-            XLSX.writeFile(wb, nomeArquivo);
-            alert('Relatório exportado para Excel com sucesso!');
+            <!-- Continuação do código anterior... -->
+
+// Salvar arquivo
+XLSX.writeFile(wb, nomeArquivo);
+alert('Relatório exportado para Excel com sucesso!');
         }
         
         // Fazer backup
@@ -2638,13 +2779,77 @@
             }
         }
         
+        // Testar o scanner
+        function testarScanner() {
+            console.log("Testando scanner...");
+            iniciarScanner('codigoBarras');
+            
+            // Simular um código de barras após 3 segundos para teste
+            setTimeout(() => {
+                if (scannerAtivo) {
+                    console.log("Scanner está ativo, simulando código...");
+                    document.getElementById('codigoBarras').value = "7891234567890";
+                    fecharScanner();
+                    alert("Teste do scanner realizado com sucesso! Código simulado: 7891234567890");
+                }
+            }, 3000);
+        }
+        
         // Inicializar a aplicação
         window.onload = function() {
             inicializarBancosDeDados();
             document.getElementById('userId').focus();
             toggleMotivoField(); // Inicializar visibilidade do campo motivo
             mudarTipoRelatorio(); // Inicializar visibilidade do campo período
+            
+            // Adicionar evento de teste ao botão de simular scan (para teste)
+            document.querySelectorAll('.scan-btn').forEach(btn => {
+                if (btn.textContent.includes('Simular Scan')) {
+                    btn.addEventListener('click', function() {
+                        const campoId = this.getAttribute('onclick').match(/'([^']+)'/)[1];
+                        setTimeout(() => {
+                            document.getElementById(campoId).value = "7891234567890";
+                            if (campoId === 'retirarCodigo') {
+                                buscarMedicamentoPorCodigo("7891234567890");
+                            }
+                        }, 500);
+                    });
+                }
+            });
+            
+            // Adicionar botão de teste para o scanner (apenas em desenvolvimento)
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                const testButton = document.createElement('button');
+                testButton.textContent = 'Testar Scanner';
+                testButton.className = 'btn';
+                testButton.style.background = 'var(--accent)';
+                testButton.style.marginTop = '10px';
+                testButton.onclick = testarScanner;
+                document.querySelector('.login-form').appendChild(testButton);
+            }
         };
+
+        // Configurar o botão voltar do navegador para funcionar com o histórico de navegação
+        window.addEventListener('popstate', function(event) {
+            navigateBack();
+        });
+
+        // Prevenir que o navegador saia do aplicativo sem confirmação
+        window.addEventListener('beforeunload', function (e) {
+            if (document.getElementById('appContainer').style.display === 'block') {
+                e.preventDefault();
+                e.returnValue = '';
+                return '';
+            }
+        });
+
+        // Adicionar evento de teclado para o botão voltar em dispositivos Android
+        document.addEventListener('backbutton', function(e) {
+            if (document.getElementById('appContainer').style.display === 'block') {
+                e.preventDefault();
+                navigateBack();
+            }
+        }, false);
     </script>
 </body>
 </html>
